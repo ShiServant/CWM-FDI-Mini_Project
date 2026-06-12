@@ -94,6 +94,27 @@ class MarionetteClient:
         )
         return result.get("value") if isinstance(result, dict) else result
 
+    def execute_async_script(self, script):
+        """
+        Run asynchronous JavaScript. The script receives a callback as its
+        last argument and must call it with the result:
+
+            const done = arguments[arguments.length - 1];
+            somePromise.then(value => done(value));
+        """
+        result = self._command(
+            "WebDriver:ExecuteAsyncScript", {"script": script, "args": []}
+        )
+        return result.get("value") if isinstance(result, dict) else result
+
+    def set_context(self, context):
+        """
+        Switch the script execution context: 'content' runs scripts in the
+        current web page (default); 'chrome' runs them with browser-level
+        privileges, giving access to APIs like ChromeUtils.
+        """
+        self._command("Marionette:SetContext", {"value": context})
+
     def close(self):
         try:
             self.sock.close()
