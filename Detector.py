@@ -38,7 +38,7 @@ from Marionette import MarionetteClient
 # -------------------------------------------------
 WINDOW_SECONDS = 15          # sliding window length (1 sample per second)
 
-CPU_HIGH_PERCENT = 80.0      # average CPU above this is "high"
+CPU_HIGH_PERCENT = 70.0      # average load per core above this is "high"
 CPU_LOW_PERCENT = 50.0       # average CPU below this is "low" (network rule)
 JS_SLOW_SECONDS = 0.5        # average JS responsiveness above this is "slow"
 LAG_SLOW_SECONDS = 0.1       # fallback: average scheduling lag above this
@@ -173,8 +173,8 @@ class FallbackMetrics:
 def detect_cpu(avg_cpu, avg_resp, resp_threshold, resp_label):
     """
     CPU rules:
-        Warning:    avg CPU > 80%  OR  avg responsiveness above threshold
-        Bottleneck: avg CPU > 80%  AND avg responsiveness above threshold
+        Warning:    avg CPU > 70%  OR  avg responsiveness above threshold
+        Bottleneck: avg CPU > 70%  AND avg responsiveness above threshold
 
     The responsiveness threshold is 0.5s for in-browser JS latency
     (Marionette mode), 0.1s for the fallback scheduling-lag proxy.

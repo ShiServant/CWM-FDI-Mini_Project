@@ -8,14 +8,16 @@ detects CPU, memory and network bottlenecks in real time, using a
 
 | File | Purpose |
 | --- | --- |
-| `CPUmon.py` | Finds all Firefox processes and measures their combined CPU usage (%). |
+| `CPUmon.py` | Finds all Firefox processes and measures average CPU usage per core (%). |
 | `Memmon.py` | Measures combined Firefox memory usage (RSS, bytes). |
 | `Marionette.py` | Minimal client for Firefox's built-in Marionette remote protocol (standard library only). |
 | `Detector.py` | Main program: collects all metrics, applies the bottleneck rules and prints alerts. |
 
 ## Metrics
 
-- **Firefox CPU usage (%)** — sum over all Firefox processes (`psutil`).
+- **Firefox CPU usage (%)** — average load per logical CPU core: the
+  sum of all Firefox processes (`psutil`) divided by the number of
+  cores, so the value stays in the 0–100% range.
 - **Firefox memory usage (MB)** — sum of RSS over all Firefox processes.
 - **JavaScript responsiveness (s)** — round-trip time of a trivial
   `execute_script()` call inside the browser.
@@ -31,8 +33,8 @@ Two severity levels are reported: `WARNING` and `BOTTLENECK`.
 
 **CPU**
 
-- Warning: average CPU > 80% **or** average JS responsiveness > 0.5 s
-- Bottleneck: average CPU > 80% **and** average JS responsiveness > 0.5 s
+- Warning: average CPU > 70% **or** average JS responsiveness > 0.5 s
+- Bottleneck: average CPU > 70% **and** average JS responsiveness > 0.5 s
 
 **Memory**
 
@@ -109,7 +111,7 @@ The detector prints which mode it chose at startup. Stop it with
 Monitoring mode: Marionette (built into Firefox, no installs needed)
 
 [2026-06-12 10:03:20] CPU:  87.3% | Mem:   2911.4 MB (18.2% sys) | JS: 0.612s | Load: 4.10s
-[2026-06-12 10:03:21] BOTTLENECK | CPU | avg CPU 85.1% > 80% and avg JS responsiveness 0.587s > 0.5s
+[2026-06-12 10:03:21] BOTTLENECK | CPU | avg CPU 75.1% > 70% and avg JS responsiveness 0.587s > 0.5s
                       Recommendation: Close heavy tabs, disable unused extensions and enable hardware acceleration.
 ```
 

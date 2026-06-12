@@ -38,10 +38,15 @@ def find_firefox_processes():
 
 def get_firefox_cpu_percent():
     """
-    Calculate total CPU usage of all Firefox processes.
+    Average CPU usage of all Firefox processes across all CPU cores.
+
+    psutil reports each process as a percentage of one core (so values
+    can add up to N*100 on an N-core machine). We sum every Firefox
+    process, then divide by the number of logical CPUs so the result
+    is the average load per core in the range 0-100%.
 
     Returns:
-        float: Combined CPU usage percentage.
+        float: Average Firefox CPU usage per core (%).
     """
     procs = find_firefox_processes()
     total_cpu = 0.0
@@ -53,7 +58,8 @@ def get_firefox_cpu_percent():
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
-    return total_cpu
+    cores = psutil.cpu_count(logical=True) or 1
+    return total_cpu / cores
 
 
 def monitor_firefox_cpu(
@@ -72,7 +78,7 @@ def monitor_firefox_cpu(
             before reporting a bottleneck.
 
     Example rule:
-        CPU > 80% for 15 seconds
+        CPU > 70% for 15 seconds
         -> CPU Bottleneck
     """
 
@@ -104,7 +110,7 @@ def monitor_firefox_cpu(
         cpu_window.append(cpu)
 
         # Display current reading
-        print(f"Firefox CPU Usage: {cpu:.1f}%")
+        print(f"Firefox CPU Usage (avg per core): {cpu:.1f}%")
 
         # Wait 1 second before next measurement
         time.sleep(1)
