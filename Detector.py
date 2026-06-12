@@ -40,10 +40,10 @@ WINDOW_SECONDS = 15          # sliding window length (1 sample per second)
 
 CPU_HIGH_PERCENT = 70.0      # average load per core above this is "high"
 CPU_LOW_PERCENT = 50.0       # average CPU below this is "low" (network rule)
-JS_SLOW_SECONDS = 0.5        # average JS responsiveness above this is "slow"
+JS_SLOW_SECONDS = 0.15       # average JS responsiveness above this is "slow"
 LAG_SLOW_SECONDS = 0.1       # fallback: average scheduling lag above this
 MEM_SYSTEM_FRACTION = 0.80   # memory above 80% of total system memory
-MEM_GROWTH_MB = 500.0        # memory growth within one window
+MEM_GROWTH_MB = 1000.0       # memory growth within one window
 PAGE_LOAD_SLOW_SECONDS = 5.0 # average page load above this is "slow"
 
 # Fallback mode settings
@@ -176,7 +176,7 @@ def detect_cpu(avg_cpu, avg_resp, resp_threshold, resp_label):
         Warning:    avg CPU > 70%  OR  avg responsiveness above threshold
         Bottleneck: avg CPU > 70%  AND avg responsiveness above threshold
 
-    The responsiveness threshold is 0.5s for in-browser JS latency
+    The responsiveness threshold is 0.15s for in-browser JS latency
     (Marionette mode), 0.1s for the fallback scheduling-lag proxy.
     """
     cpu_high = avg_cpu > CPU_HIGH_PERCENT
@@ -205,8 +205,8 @@ def detect_cpu(avg_cpu, avg_resp, resp_threshold, resp_label):
 def detect_memory(current_mem_mb, mem_growth_mb, total_mem_mb):
     """
     Memory rules:
-        Warning:    memory > 80% of system memory  OR  growth > 500MB / window
-        Bottleneck: memory > 80% of system memory  AND growth > 500MB / window
+        Warning:    memory > 80% of system memory  OR  growth > 1000MB / window
+        Bottleneck: memory > 80% of system memory  AND growth > 1000MB / window
     """
     mem_fraction = current_mem_mb / total_mem_mb
     mem_high = mem_fraction > MEM_SYSTEM_FRACTION

@@ -33,14 +33,14 @@ Two severity levels are reported: `WARNING` and `BOTTLENECK`.
 
 **CPU**
 
-- Warning: average CPU > 70% **or** average JS responsiveness > 0.5 s
-- Bottleneck: average CPU > 70% **and** average JS responsiveness > 0.5 s
+- Warning: average CPU > 70% **or** average JS responsiveness > 0.15 s
+- Bottleneck: average CPU > 70% **and** average JS responsiveness > 0.15 s
 
 **Memory**
 
-- Warning: memory > 80% of total system memory **or** growth > 500 MB
+- Warning: memory > 80% of total system memory **or** growth > 1000 MB
   within the window
-- Bottleneck: memory > 80% of total system memory **and** growth > 500 MB
+- Bottleneck: memory > 80% of total system memory **and** growth > 1000 MB
   within the window
 
 **Network (possible bottleneck)**
@@ -99,7 +99,7 @@ Used automatically if the Marionette connection is unavailable.
 Approximates the two in-browser metrics:
 
 - responsiveness → scheduling lag of a 50 ms sleep (threshold 0.1 s
-  instead of 0.5 s),
+  instead of 0.15 s),
 - page load → timed HTTP download of a small test page every 5 s.
 
 The detector prints which mode it chose at startup. Stop it with
@@ -111,7 +111,7 @@ The detector prints which mode it chose at startup. Stop it with
 Monitoring mode: Marionette (built into Firefox, no installs needed)
 
 [2026-06-12 10:03:20] CPU:  87.3% | Mem:   2911.4 MB (18.2% sys) | JS: 0.612s | Load: 4.10s
-[2026-06-12 10:03:21] BOTTLENECK | CPU | avg CPU 75.1% > 70% and avg JS responsiveness 0.587s > 0.5s
+[2026-06-12 10:03:21] BOTTLENECK | CPU | avg CPU 75.1% > 70% and avg JS responsiveness 0.187s > 0.15s
                       Recommendation: Close heavy tabs, disable unused extensions and enable hardware acceleration.
 ```
 
