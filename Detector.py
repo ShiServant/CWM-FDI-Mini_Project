@@ -12,11 +12,7 @@ available mode, in this order:
    Firefox's built-in remote protocol, spoken over a plain TCP socket
    using only the standard library. Start Firefox yourself with:
 
-       firefox -marionette -remote-allow-system-access &
-
-   (-remote-allow-system-access enables the privileged API used for
-   per-website resource attribution; without it the detector still
-   works but alerts only show process-level data.)
+       firefox -marionette &
 
 2. Fallback (stdlib only, no browser connection):
    - Responsiveness proxy: scheduling lag of a short sleep.
@@ -25,9 +21,7 @@ available mode, in this order:
 Severity levels: WARNING and BOTTLENECK.
 '''
 
-import json
 import time
-import urllib.parse
 import urllib.request
 from collections import deque
 from datetime import datetime
@@ -69,91 +63,6 @@ PAGE_LOAD_SCRIPT = (
     "return nav.loadEventEnd - nav.startTime;"
 )
 
-# Chrome-context (privileged) script: per-process CPU time, memory and
-# site origin via ChromeUtils.requestProcInfo() - the same API behind
-# Firefox's about:processes page. With Fission, each website runs in its
-# own process, so processes map cleanly to sites.
-PROC_INFO_SCRIPT = """
-const done = arguments[arguments.length - 1];
-ChromeUtils.requestProcInfo().then(info => {
-    const procs = [{
-        pid: info.pid, type: 'parent', origin: '',
-        memory: info.memory, cpuTime: String(info.cpuTime), pages: []
-    }];
-    for (const child of info.children) {
-        let pages = [];
-        try {
-            pages = (child.windows || [])
-                .filter(w => w.documentURI)
-                .map(w => w.documentURI.spec)
-                .slice(0, 5);
-        } catch (e) {}
-        procs.push({
-            pid: child.pid, type: child.type, origin: child.origin || '',
-            memory: child.memory, cpuTime: String(child.cpuTime),
-            pages: pages
-        });
-    }
-    done(JSON.stringify(procs));
-}).catch(e => done(JSON.stringify({error: String(e)})));
-"""
-
-# Same data via a synchronous script that returns a Promise (Marionette
-# awaits returned promises). Used automatically if the async-script
-# variant fails on this Firefox version.
-PROC_INFO_SCRIPT_SYNC = """
-return ChromeUtils.requestProcInfo().then(info => {
-    const procs = [{
-        pid: info.pid, type: 'parent', origin: '',
-        memory: info.memory, cpuTime: String(info.cpuTime), pages: []
-    }];
-    for (const child of info.children) {
-        let pages = [];
-        try {
-            pages = (child.windows || [])
-                .filter(w => w.documentURI)
-                .map(w => w.documentURI.spec)
-                .slice(0, 5);
-        } catch (e) {}
-        procs.push({
-            pid: child.pid, type: child.type, origin: child.origin || '',
-            memory: child.memory, cpuTime: String(child.cpuTime),
-            pages: pages
-        });
-    }
-    return JSON.stringify(procs);
-}).catch(e => JSON.stringify({error: String(e)}));
-"""
-
-# Friendly names for Firefox's non-website helper processes
-PROCESS_TYPE_NAMES = {
-    "parent": "Firefox main process (UI)",
-    "gpu": "GPU process",
-    "socket": "network I/O process",
-    "extension": "extensions process",
-    "rdd": "media decoder process",
-    "utility": "utility process",
-    "preallocated": "preallocated (idle) process",
-    "privilegedabout": "about: pages",
-    "web": "shared web content",
-}
-
-
-def _site_label(proc):
-    """Human-readable owner of a process: site origin, page host or type."""
-    origin = proc.get("origin", "")
-    if origin and origin not in ("null",):
-        return origin.split("^")[0]  # strip partition suffixes
-
-    for url in proc.get("pages") or []:
-        host = urllib.parse.urlsplit(url).netloc
-        if host:
-            return host
-
-    proc_type = proc.get("type", "unknown")
-    return PROCESS_TYPE_NAMES.get(proc_type, f"{proc_type} process")
-
-
 class MarionetteMetrics:
     """
     Responsiveness and page load measured inside the browser via
@@ -168,99 +77,7 @@ class MarionetteMetrics:
 
     def __init__(self):
         self.client = MarionetteClient()
-        self._prev_cpu_ns = {}      # pid -> cumulative CPU time (ns)
-        self._prev_sample_time = None
-        self.latest_consumers = []  # refreshed every tick by sample_consumers()
-        self._consumer_error_shown = False
-        self._use_sync_procinfo = False
         print("Connected to Firefox via Marionette; browse normally.\n")
-
-    def _consumer_failure(self, reason):
-        """Warn once (not every tick) when per-site attribution fails."""
-        if not self._consumer_error_shown:
-            self._consumer_error_shown = True
-            print(
-                f"Note: per-site attribution unavailable ({reason}); "
-                "alerts will fall back to process-level data."
-            )
-            if "system access" in reason.lower():
-                print(
-                    "      Fix: restart Firefox with\n"
-                    "      firefox -marionette -remote-allow-system-access"
-                )
-            print()
-
-    def sample_consumers(self):
-        """
-        Refresh self.latest_consumers: per-site CPU% and memory, aggregated
-        over Firefox's processes. CPU% is computed from the growth of each
-        process's cumulative CPU time since the previous call (~1s ago).
-        """
-        try:
-            self.client.set_context("chrome")
-            try:
-                if self._use_sync_procinfo:
-                    raw = self.client.execute_script(PROC_INFO_SCRIPT_SYNC)
-                else:
-                    try:
-                        raw = self.client.execute_async_script(PROC_INFO_SCRIPT)
-                    except RuntimeError:
-                        # Async chrome scripts unsupported here; switch to
-                        # the synchronous promise-based variant for good.
-                        self._use_sync_procinfo = True
-                        raw = self.client.execute_script(PROC_INFO_SCRIPT_SYNC)
-            finally:
-                self.client.set_context("content")
-            procs = json.loads(raw)
-        except (RuntimeError, ValueError, TypeError) as exc:
-            self._consumer_failure(str(exc))
-            return  # privileged API unavailable; keep last known data
-
-        if not isinstance(procs, list):  # {'error': ...} from the script
-            self._consumer_failure(str(procs.get("error", procs)))
-            return
-
-        now = time.perf_counter()
-        wall_ns = (
-            (now - self._prev_sample_time) * 1e9
-            if self._prev_sample_time is not None else None
-        )
-
-        groups = {}
-        new_cpu_ns = {}
-        for proc in procs:
-            pid = proc["pid"]
-            cpu_ns = float(proc["cpuTime"])
-            new_cpu_ns[pid] = cpu_ns
-
-            label = _site_label(proc)
-            group = groups.setdefault(
-                label, {"cpu": 0.0, "mem_mb": 0.0, "procs": 0, "has_cpu": False}
-            )
-            group["mem_mb"] += proc["memory"] / (1024 * 1024)
-            group["procs"] += 1
-            if wall_ns and pid in self._prev_cpu_ns:
-                delta = max(0.0, cpu_ns - self._prev_cpu_ns[pid])
-                group["cpu"] += delta / wall_ns * 100.0
-                group["has_cpu"] = True
-
-        self._prev_cpu_ns = new_cpu_ns
-        self._prev_sample_time = now
-
-        consumers = [
-            {
-                "label": label,
-                "cpu_percent": g["cpu"] if g["has_cpu"] else None,
-                "memory_mb": g["mem_mb"],
-                "processes": g["procs"],
-            }
-            for label, g in groups.items()
-        ]
-        consumers.sort(
-            key=lambda c: (c["cpu_percent"] or 0.0, c["memory_mb"]),
-            reverse=True,
-        )
-        self.latest_consumers = consumers
 
     def responsiveness(self):
         """Round-trip time of a trivial execute_script() call (seconds)."""
@@ -332,11 +149,9 @@ class FallbackMetrics:
 
 def top_firefox_processes(limit=3, sample_seconds=0.25):
     """
-    psutil-based attribution used when Marionette data is unavailable:
-    ranks individual Firefox processes by CPU over a short sample.
+    Rank individual Firefox processes by CPU over a short sample.
     On Linux the process names hint at the role ("Isolated Web Co" =
-    website content, "WebExtensions", "GPU Process", ...), but cannot
-    name the specific website.
+    website content, "WebExtensions", "GPU Process", ...).
     """
     procs = find_firefox_processes()
     for p in procs:
@@ -354,13 +169,12 @@ def top_firefox_processes(limit=3, sample_seconds=0.25):
                 "label": f"{p.name()} (pid {p.pid})",
                 "cpu_percent": p.cpu_percent(interval=None),
                 "memory_mb": p.memory_info().rss / (1024 * 1024),
-                "processes": 1,
             })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
     entries.sort(
-        key=lambda c: (c["cpu_percent"] or 0.0, c["memory_mb"]), reverse=True
+        key=lambda c: (c["cpu_percent"], c["memory_mb"]), reverse=True
     )
     return entries[:limit]
 
@@ -470,8 +284,7 @@ def create_metrics():
     except OSError:
         print(
             "Marionette not reachable on port 2828.\n"
-            "(To enable it: close Firefox, then run\n"
-            "  firefox -marionette -remote-allow-system-access )\n"
+            "(To enable it: close Firefox, then run  firefox -marionette)\n"
         )
 
     return FallbackMetrics()
@@ -521,11 +334,6 @@ def run_detector(duration_seconds=None):
             if page_load is not None:
                 load_window.append(page_load)
 
-            # Keep per-site attribution fresh (Marionette mode only),
-            # so CPU% deltas cover the last ~1 second.
-            if hasattr(metrics, "sample_consumers"):
-                metrics.sample_consumers()
-
             # ---- Status line ----
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             load_text = f"{page_load:.2f}s" if page_load is not None else "n/a"
@@ -561,23 +369,16 @@ def run_detector(duration_seconds=None):
                         f"{'':21s} Recommendation: {recommendation}"
                     )
 
-                # ---- Attribute the load to specific sites/processes ----
+                # ---- Attribute the load to the heaviest processes ----
                 if fired:
-                    consumers = getattr(metrics, "latest_consumers", None)
-                    if not consumers:
-                        consumers = top_firefox_processes()
+                    consumers = top_firefox_processes()
                     if consumers:
                         print(f"{'':21s} Top resource consumers:")
-                        for c in consumers[:3]:
-                            cpu_text = (
-                                f"{c['cpu_percent']:5.1f}%"
-                                if c["cpu_percent"] is not None else "  n/a"
-                            )
+                        for c in consumers:
                             print(
                                 f"{'':21s}   - {c['label']}: "
-                                f"CPU {cpu_text}, "
-                                f"Mem {c['memory_mb']:7.1f} MB "
-                                f"({c['processes']} process(es))"
+                                f"CPU {c['cpu_percent']:5.1f}%, "
+                                f"Mem {c['memory_mb']:7.1f} MB"
                             )
 
             # ---- Keep a 1 sample/second cadence ----

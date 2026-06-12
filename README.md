@@ -12,7 +12,6 @@ detects CPU, memory and network bottlenecks in real time, using a
 | `Memmon.py` | Measures combined Firefox memory usage (RSS, bytes). |
 | `Marionette.py` | Minimal client for Firefox's built-in Marionette remote protocol (standard library only). |
 | `Detector.py` | Main program: collects all metrics, applies the bottleneck rules and prints alerts. |
-| `Diagnose.py` | Step-by-step test of the Marionette connection, for troubleshooting. |
 
 ## Metrics
 
@@ -48,12 +47,10 @@ Two severity levels are reported: `WARNING` and `BOTTLENECK`.
 Thresholds are constants at the top of `Detector.py` and can be tuned.
 
 When an alert fires, the detector also prints the **top resource
-consumers**. In Marionette mode this is per website (via
-`ChromeUtils.requestProcInfo()`, the API behind `about:processes` -
-with Fission every site runs in its own process, so CPU and memory can
-be attributed to specific origins). In fallback mode it falls back to
-ranking individual Firefox processes by CPU/memory, which shows the
-process role (e.g. "Isolated Web Co") but not the website name.
+consumers**: the individual Firefox processes using the most CPU and
+memory at that moment. On Linux the process name indicates the role -
+"Isolated Web Co" is website content, "WebExtensions" is add-ons,
+"firefox" is the main browser process.
 
 ## Requirements
 
@@ -84,9 +81,8 @@ geckodriver uses). `Marionette.py` speaks it over a plain TCP socket.
 # Close Firefox completely first - the flag only works on a fresh launch
 pkill firefox
 
-# Start Firefox with Marionette enabled (robot icon appears in the URL bar).
-# -remote-allow-system-access is needed for per-website attribution.
-firefox -marionette -remote-allow-system-access &
+# Start Firefox with Marionette enabled (robot icon appears in the URL bar)
+firefox -marionette &
 
 # Verify it is listening (should show 127.0.0.1:2828)
 ss -tln | grep 2828
@@ -120,9 +116,9 @@ Monitoring mode: Marionette (built into Firefox, no installs needed)
 [2026-06-12 10:03:21] BOTTLENECK | CPU | avg CPU 85.1% > 80% and avg JS responsiveness 0.587s > 0.5s
                       Recommendation: Close heavy tabs, disable unused extensions and enable hardware acceleration.
                       Top resource consumers:
-                        - https://www.youtube.com: CPU  72.4%, Mem   812.3 MB (2 process(es))
-                        - Firefox main process (UI): CPU  21.0%, Mem   654.1 MB (1 process(es))
-                        - GPU process: CPU   8.2%, Mem   178.9 MB (1 process(es))
+                        - Isolated Web Co (pid 158425): CPU  72.4%, Mem   812.3 MB
+                        - firefox (pid 158102): CPU  21.0%, Mem   654.1 MB
+                        - Isolated Web Co (pid 158530): CPU   8.2%, Mem   178.9 MB
 ```
 
 ## Other scripts
@@ -131,7 +127,6 @@ Monitoring mode: Marionette (built into Firefox, no installs needed)
 python3 CPUmon.py       # CPU monitor only
 python3 Memmon.py       # memory monitor only
 python3 Marionette.py   # test the Marionette connection
-python3 Diagnose.py     # full step-by-step connection diagnostic
 ```
 
 ## Troubleshooting
@@ -143,11 +138,8 @@ python3 Diagnose.py     # full step-by-step connection diagnostic
   contains `-marionette`, and that `ss -tln | grep 2828` shows a
   listener. For snap/flatpak installs try `MOZ_MARIONETTE=1 firefox &`
   or `flatpak run org.mozilla.firefox -marionette`.
-- **Alerts show `firefox (pid ...)` instead of website names** — the
-  privileged per-site API needs Firefox to be started with the extra
-  `-remote-allow-system-access` flag (the detector prints a note with
-  the reason at startup). Run `python3 Diagnose.py` to test the whole
-  chain step by step.
+- **Marionette mode not working** — run `python3 Marionette.py` to
+  test the connection on its own.
 - **Readings include other Firefox windows** — the CPU/memory monitors
   aggregate *all* Firefox processes on the system, so close other
   instances for clean measurements.

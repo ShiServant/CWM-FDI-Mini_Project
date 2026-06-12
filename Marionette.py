@@ -9,10 +9,7 @@ Usage:
     1. Close all running Firefox windows.
     2. Start Firefox with the protocol enabled:
 
-           firefox -marionette -remote-allow-system-access &
-
-       (-remote-allow-system-access is only needed for privileged
-       chrome-context scripts, e.g. per-site resource attribution.)
+           firefox -marionette &
 
     3. Connect from Python:
 
@@ -96,27 +93,6 @@ class MarionetteClient:
             "WebDriver:ExecuteScript", {"script": script, "args": []}
         )
         return result.get("value") if isinstance(result, dict) else result
-
-    def execute_async_script(self, script):
-        """
-        Run asynchronous JavaScript. The script receives a callback as its
-        last argument and must call it with the result:
-
-            const done = arguments[arguments.length - 1];
-            somePromise.then(value => done(value));
-        """
-        result = self._command(
-            "WebDriver:ExecuteAsyncScript", {"script": script, "args": []}
-        )
-        return result.get("value") if isinstance(result, dict) else result
-
-    def set_context(self, context):
-        """
-        Switch the script execution context: 'content' runs scripts in the
-        current web page (default); 'chrome' runs them with browser-level
-        privileges, giving access to APIs like ChromeUtils.
-        """
-        self._command("Marionette:SetContext", {"value": context})
 
     def close(self):
         try:
