@@ -167,38 +167,6 @@ class FallbackMetrics:
         pass
 
 
-def top_firefox_processes(limit=3, sample_seconds=0.25):
-    """
-    Rank individual Firefox processes by CPU over a short sample.
-    On Linux the process names hint at the role ("Isolated Web Co" =
-    website content, "WebExtensions", "GPU Process", ...).
-    """
-    procs = find_firefox_processes()
-    for p in procs:
-        try:
-            p.cpu_percent(interval=None)  # prime the measurement
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
-    time.sleep(sample_seconds)
-
-    entries = []
-    for p in procs:
-        try:
-            entries.append({
-                "label": f"{p.name()} (pid {p.pid})",
-                "cpu_percent": p.cpu_percent(interval=None),
-                "memory_mb": p.memory_info().rss / (1024 * 1024),
-            })
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
-    entries.sort(
-        key=lambda c: (c["cpu_percent"], c["memory_mb"]), reverse=True
-    )
-    return entries[:limit]
-
-
 # -------------------------------------------------
 # Detection rules (evaluated on a full sliding window)
 # -------------------------------------------------
@@ -391,25 +359,14 @@ def run_detector(duration_seconds=None):
                     detect_network(avg_cpu, mem_mb, total_mem_mb, avg_load),
                 ]
 
-                fired = [alert for alert in alerts if alert is not None]
-
-                for severity, kind, details, recommendation in fired:
+                for alert in alerts:
+                    if alert is None:
+                        continue
+                    severity, kind, details, recommendation = alert
                     print(
                         f"[{timestamp}] {severity:10s} | {kind} | {details}\n"
                         f"{'':21s} Recommendation: {recommendation}"
                     )
-
-                # ---- Attribute the load to the heaviest processes ----
-                if fired:
-                    consumers = top_firefox_processes()
-                    if consumers:
-                        print(f"{'':21s} Top resource consumers:")
-                        for c in consumers:
-                            print(
-                                f"{'':21s}   - {c['label']}: "
-                                f"CPU {c['cpu_percent']:5.1f}%, "
-                                f"Mem {c['memory_mb']:7.1f} MB"
-                            )
 
             # ---- Keep a 1 sample/second cadence ----
             elapsed = time.perf_counter() - tick_start

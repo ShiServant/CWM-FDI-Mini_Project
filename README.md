@@ -49,12 +49,6 @@ Two severity levels are reported: `WARNING` and `BOTTLENECK`.
 
 Thresholds are constants at the top of `Detector.py` and can be tuned.
 
-When an alert fires, the detector also prints the **top resource
-consumers**: the individual Firefox processes using the most CPU and
-memory at that moment. On Linux the process name indicates the role -
-"Isolated Web Co" is website content, "WebExtensions" is add-ons,
-"firefox" is the main browser process.
-
 ## Requirements
 
 - Linux, Python 3.8+
@@ -118,10 +112,6 @@ Monitoring mode: Marionette (built into Firefox, no installs needed)
 [2026-06-12 10:03:20] CPU:  87.3% | Mem:   2911.4 MB (18.2% sys) | JS: 0.612s | Load: 4.10s
 [2026-06-12 10:03:21] BOTTLENECK | CPU | avg CPU 85.1% > 80% and avg JS responsiveness 0.587s > 0.5s
                       Recommendation: Close heavy tabs, disable unused extensions and enable hardware acceleration.
-                      Top resource consumers:
-                        - Isolated Web Co (pid 158425): CPU  72.4%, Mem   812.3 MB
-                        - firefox (pid 158102): CPU  21.0%, Mem   654.1 MB
-                        - Isolated Web Co (pid 158530): CPU   8.2%, Mem   178.9 MB
 ```
 
 ## Other scripts
