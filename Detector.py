@@ -4,20 +4,22 @@ Firefox Bottleneck Detector (Linux)
 Continuously monitors Firefox using a 15-second sliding window and reports
 CPU, memory and network bottlenecks.
 
-Metrics (Selenium mode, used automatically when selenium is installed):
-    - Firefox CPU usage (%)              -> CPUmon
-    - Firefox memory usage (MB)          -> Memmon
-    - JavaScript responsiveness (s)      -> Selenium execute_script latency
-    - Page load time (s)                 -> browser Performance API
+CPU and memory always come from CPUmon/Memmon. For in-browser metrics
+(JS responsiveness, page load time) the detector picks the best
+available mode, in this order:
 
-Metrics (fallback mode, standard library only — no Selenium needed):
-    - Firefox CPU usage (%)              -> CPUmon
-    - Firefox memory usage (MB)          -> Memmon
-    - System responsiveness (s)          -> scheduling lag of a short sleep
-    - Page fetch time (s)                -> timed HTTP download of a test URL
+1. Marionette (preferred, no installs needed):
+   Firefox's built-in remote protocol, spoken over a plain TCP socket
+   using only the standard library. Start Firefox yourself with:
 
-In fallback mode, monitor the Firefox you launched yourself; no browser
-window is opened by this script.
+       firefox -marionette &
+
+2. Selenium (if the package is installed and Marionette is unreachable):
+   Opens its own Firefox window via geckodriver.
+
+3. Fallback (stdlib only, no browser connection):
+   - Responsiveness proxy: scheduling lag of a short sleep.
+   - Page load proxy: timed HTTP download of a small test URL.
 
 Severity levels: WARNING and BOTTLENECK.
 '''
@@ -35,10 +37,13 @@ try:
     SELENIUM_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
-    WebDriverException = Exception  # placeholder so except clauses still work
+
+    class WebDriverException(Exception):
+        """Placeholder so except clauses still work without selenium."""
 
 from CPUmon import find_firefox_processes, get_firefox_cpu_percent
 from Memmon import get_firefox_memory_usage
+from Marionette import MarionetteClient
 
 
 # -------------------------------------------------
@@ -63,6 +68,46 @@ FETCH_TIMEOUT_SECONDS = 10
 # -------------------------------------------------
 # Metric providers
 # -------------------------------------------------
+# JavaScript snippet shared by the browser-connected modes: reads the
+# current page's load time from the Performance API (Navigation Timing).
+PAGE_LOAD_SCRIPT = (
+    "const nav = performance.getEntriesByType('navigation')[0];"
+    "if (!nav || nav.loadEventEnd === 0) { return null; }"
+    "return nav.loadEventEnd - nav.startTime;"
+)
+
+
+class MarionetteMetrics:
+    """
+    Responsiveness and page load measured inside the browser via
+    Firefox's built-in Marionette protocol (standard library only).
+
+    Requires Firefox to be started with:  firefox -marionette
+    """
+
+    mode_name = "Marionette (built into Firefox, no installs needed)"
+    resp_label = "JS"
+    resp_threshold = JS_SLOW_SECONDS
+
+    def __init__(self):
+        self.client = MarionetteClient()
+        print("Connected to Firefox via Marionette; browse normally.\n")
+
+    def responsiveness(self):
+        """Round-trip time of a trivial execute_script() call (seconds)."""
+        start = time.perf_counter()
+        self.client.execute_script("return 0;")
+        return time.perf_counter() - start
+
+    def page_load_time(self):
+        """Current page's load time in seconds, or None if still loading."""
+        load_ms = self.client.execute_script(PAGE_LOAD_SCRIPT)
+        return None if load_ms is None else load_ms / 1000.0
+
+    def close(self):
+        self.client.close()
+
+
 class SeleniumMetrics:
     """
     Responsiveness and page load measured inside the browser
@@ -89,11 +134,7 @@ class SeleniumMetrics:
         Load time of the current page from the browser Performance API
         (Navigation Timing), in seconds, or None if not finished loading.
         """
-        load_ms = self.driver.execute_script(
-            "const nav = performance.getEntriesByType('navigation')[0];"
-            "if (!nav || nav.loadEventEnd === 0) { return null; }"
-            "return nav.loadEventEnd - nav.startTime;"
-        )
+        load_ms = self.driver.execute_script(PAGE_LOAD_SCRIPT)
         return None if load_ms is None else load_ms / 1000.0
 
     def close(self):
@@ -121,7 +162,7 @@ class FallbackMetrics:
 
     def __init__(self):
         self._tick = 0
-        print("Selenium not found - running in fallback mode.")
+        print("No browser connection available - running in fallback mode.")
         print("Start Firefox yourself and browse normally.\n")
 
     def responsiveness(self):
@@ -250,6 +291,28 @@ def detect_network(avg_cpu, current_mem_mb, total_mem_mb, avg_load):
 # -------------------------------------------------
 # Main monitoring loop
 # -------------------------------------------------
+def create_metrics():
+    """
+    Pick the best available metric provider:
+    Marionette -> Selenium -> stdlib fallback.
+    """
+    try:
+        return MarionetteMetrics()
+    except OSError:
+        print(
+            "Marionette not reachable on port 2828.\n"
+            "(To enable it: close Firefox, then run  firefox -marionette)\n"
+        )
+
+    if SELENIUM_AVAILABLE:
+        try:
+            return SeleniumMetrics()
+        except WebDriverException as exc:
+            print(f"Selenium could not start Firefox: {exc}\n")
+
+    return FallbackMetrics()
+
+
 def run_detector(duration_seconds=None):
     """
     Continuously monitor Firefox and report bottlenecks.
@@ -258,7 +321,7 @@ def run_detector(duration_seconds=None):
         duration_seconds: total run time, or None to run until
             interrupted (Ctrl+C) or the browser window is closed.
     """
-    metrics = SeleniumMetrics() if SELENIUM_AVAILABLE else FallbackMetrics()
+    metrics = create_metrics()
     print(f"Monitoring mode: {metrics.mode_name}\n")
 
     total_mem_mb = psutil.virtual_memory().total / (1024 * 1024)
@@ -337,8 +400,8 @@ def run_detector(duration_seconds=None):
 
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
-    except WebDriverException:
-        print("\nBrowser window closed; monitoring stopped.")
+    except (ConnectionError, WebDriverException):
+        print("\nBrowser connection lost (window closed?); monitoring stopped.")
     finally:
         metrics.close()
 
