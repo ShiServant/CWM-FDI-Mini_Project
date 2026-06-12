@@ -16,12 +16,16 @@ def find_firefox_processes():
     """
     procs = []
 
-    for p in psutil.process_iter(["name"]):
+    for p in psutil.process_iter(["name", "cmdline"]):
         try:
-            # Convert process name to lowercase for comparison
+            # On Linux, Firefox child processes are named "Isolated Web Co",
+            # "Web Content", "WebExtensions", etc. - the name alone misses
+            # them, but their command line is the firefox binary plus
+            # "-contentproc", so check both.
             name = (p.info["name"] or "").lower()
+            cmdline = " ".join(p.info["cmdline"] or []).lower()
 
-            if "firefox" in name:
+            if "firefox" in name or "firefox" in cmdline:
                 procs.append(p)
 
         except (psutil.NoSuchProcess, psutil.AccessDenied):

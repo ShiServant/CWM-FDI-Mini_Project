@@ -94,6 +94,33 @@ ChromeUtils.requestProcInfo().then(info => {
 }).catch(e => done(JSON.stringify({error: String(e)})));
 """
 
+# Same data via a synchronous script that returns a Promise (Marionette
+# awaits returned promises). Used automatically if the async-script
+# variant fails on this Firefox version.
+PROC_INFO_SCRIPT_SYNC = """
+return ChromeUtils.requestProcInfo().then(info => {
+    const procs = [{
+        pid: info.pid, type: 'parent', origin: '',
+        memory: info.memory, cpuTime: String(info.cpuTime), pages: []
+    }];
+    for (const child of info.children) {
+        let pages = [];
+        try {
+            pages = (child.windows || [])
+                .filter(w => w.documentURI)
+                .map(w => w.documentURI.spec)
+                .slice(0, 5);
+        } catch (e) {}
+        procs.push({
+            pid: child.pid, type: child.type, origin: child.origin || '',
+            memory: child.memory, cpuTime: String(child.cpuTime),
+            pages: pages
+        });
+    }
+    return JSON.stringify(procs);
+}).catch(e => JSON.stringify({error: String(e)}));
+"""
+
 # Friendly names for Firefox's non-website helper processes
 PROCESS_TYPE_NAMES = {
     "parent": "Firefox main process (UI)",
@@ -141,6 +168,7 @@ class MarionetteMetrics:
         self._prev_sample_time = None
         self.latest_consumers = []  # refreshed every tick by sample_consumers()
         self._consumer_error_shown = False
+        self._use_sync_procinfo = False
         print("Connected to Firefox via Marionette; browse normally.\n")
 
     def _consumer_failure(self, reason):
@@ -161,7 +189,16 @@ class MarionetteMetrics:
         try:
             self.client.set_context("chrome")
             try:
-                raw = self.client.execute_async_script(PROC_INFO_SCRIPT)
+                if self._use_sync_procinfo:
+                    raw = self.client.execute_script(PROC_INFO_SCRIPT_SYNC)
+                else:
+                    try:
+                        raw = self.client.execute_async_script(PROC_INFO_SCRIPT)
+                    except RuntimeError:
+                        # Async chrome scripts unsupported here; switch to
+                        # the synchronous promise-based variant for good.
+                        self._use_sync_procinfo = True
+                        raw = self.client.execute_script(PROC_INFO_SCRIPT_SYNC)
             finally:
                 self.client.set_context("content")
             procs = json.loads(raw)
