@@ -8,16 +8,13 @@ CPU and memory always come from CPUmon/Memmon. For in-browser metrics
 (JS responsiveness, page load time) the detector picks the best
 available mode, in this order:
 
-1. Marionette (preferred, no installs needed):
+1. Marionette (preferred):
    Firefox's built-in remote protocol, spoken over a plain TCP socket
    using only the standard library. Start Firefox yourself with:
 
        firefox -marionette &
 
-2. Selenium (if the package is installed and Marionette is unreachable):
-   Opens its own Firefox window via geckodriver.
-
-3. Fallback (stdlib only, no browser connection):
+2. Fallback (stdlib only, no browser connection):
    - Responsiveness proxy: scheduling lag of a short sleep.
    - Page load proxy: timed HTTP download of a small test URL.
 
@@ -32,16 +29,6 @@ from collections import deque
 from datetime import datetime
 
 import psutil
-
-try:
-    from selenium import webdriver
-    from selenium.common.exceptions import WebDriverException
-    SELENIUM_AVAILABLE = True
-except ImportError:
-    SELENIUM_AVAILABLE = False
-
-    class WebDriverException(Exception):
-        """Placeholder so except clauses still work without selenium."""
 
 from CPUmon import find_firefox_processes, get_firefox_cpu_percent
 from Memmon import get_firefox_memory_usage
@@ -153,7 +140,17 @@ class MarionetteMetrics:
         self._prev_cpu_ns = {}      # pid -> cumulative CPU time (ns)
         self._prev_sample_time = None
         self.latest_consumers = []  # refreshed every tick by sample_consumers()
+        self._consumer_error_shown = False
         print("Connected to Firefox via Marionette; browse normally.\n")
+
+    def _consumer_failure(self, reason):
+        """Warn once (not every tick) when per-site attribution fails."""
+        if not self._consumer_error_shown:
+            self._consumer_error_shown = True
+            print(
+                f"Note: per-site attribution unavailable ({reason}); "
+                "alerts will fall back to process-level data.\n"
+            )
 
     def sample_consumers(self):
         """
@@ -168,10 +165,12 @@ class MarionetteMetrics:
             finally:
                 self.client.set_context("content")
             procs = json.loads(raw)
-        except (RuntimeError, ValueError, TypeError):
+        except (RuntimeError, ValueError, TypeError) as exc:
+            self._consumer_failure(str(exc))
             return  # privileged API unavailable; keep last known data
 
         if not isinstance(procs, list):  # {'error': ...} from the script
+            self._consumer_failure(str(procs.get("error", procs)))
             return
 
         now = time.perf_counter()
@@ -231,46 +230,11 @@ class MarionetteMetrics:
         self.client.close()
 
 
-class SeleniumMetrics:
-    """
-    Responsiveness and page load measured inside the browser
-    via Selenium. Opens its own Firefox window.
-    """
-
-    mode_name = "Selenium"
-    resp_label = "JS"
-    resp_threshold = JS_SLOW_SECONDS
-
-    def __init__(self):
-        print("Launching Firefox via Selenium...")
-        self.driver = webdriver.Firefox()
-        print("Browse normally in the opened window.\n")
-
-    def responsiveness(self):
-        """Round-trip time of a trivial execute_script() call (seconds)."""
-        start = time.perf_counter()
-        self.driver.execute_script("return 0;")
-        return time.perf_counter() - start
-
-    def page_load_time(self):
-        """
-        Load time of the current page from the browser Performance API
-        (Navigation Timing), in seconds, or None if not finished loading.
-        """
-        load_ms = self.driver.execute_script(PAGE_LOAD_SCRIPT)
-        return None if load_ms is None else load_ms / 1000.0
-
-    def close(self):
-        try:
-            self.driver.quit()
-        except WebDriverException:
-            pass
-
-
 class FallbackMetrics:
     """
-    Standard-library-only approximations, used when Selenium is not
-    installed. Monitors the Firefox instance you started yourself.
+    Standard-library-only approximations, used when the Marionette
+    connection is unavailable. Monitors the Firefox instance you
+    started yourself.
 
     - Responsiveness proxy: how much longer a 50 ms sleep takes than
       requested (scheduling lag). Under heavy CPU contention this lag
@@ -279,7 +243,7 @@ class FallbackMetrics:
       This reflects network health rather than full page rendering.
     """
 
-    mode_name = "fallback (no Selenium, stdlib only)"
+    mode_name = "fallback (no browser connection, stdlib only)"
     resp_label = "Lag"
     resp_threshold = LAG_SLOW_SECONDS
 
@@ -363,8 +327,8 @@ def detect_cpu(avg_cpu, avg_resp, resp_threshold, resp_label):
         Warning:    avg CPU > 80%  OR  avg responsiveness above threshold
         Bottleneck: avg CPU > 80%  AND avg responsiveness above threshold
 
-    The responsiveness threshold is 0.5s for Selenium JS latency,
-    0.1s for the fallback scheduling-lag proxy.
+    The responsiveness threshold is 0.5s for in-browser JS latency
+    (Marionette mode), 0.1s for the fallback scheduling-lag proxy.
     """
     cpu_high = avg_cpu > CPU_HIGH_PERCENT
     resp_slow = avg_resp > resp_threshold
@@ -452,7 +416,7 @@ def detect_network(avg_cpu, current_mem_mb, total_mem_mb, avg_load):
 def create_metrics():
     """
     Pick the best available metric provider:
-    Marionette -> Selenium -> stdlib fallback.
+    Marionette -> stdlib fallback.
     """
     try:
         return MarionetteMetrics()
@@ -461,12 +425,6 @@ def create_metrics():
             "Marionette not reachable on port 2828.\n"
             "(To enable it: close Firefox, then run  firefox -marionette)\n"
         )
-
-    if SELENIUM_AVAILABLE:
-        try:
-            return SeleniumMetrics()
-        except WebDriverException as exc:
-            print(f"Selenium could not start Firefox: {exc}\n")
 
     return FallbackMetrics()
 
@@ -581,7 +539,7 @@ def run_detector(duration_seconds=None):
 
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
-    except (ConnectionError, WebDriverException):
+    except ConnectionError:
         print("\nBrowser connection lost (window closed?); monitoring stopped.")
     finally:
         metrics.close()

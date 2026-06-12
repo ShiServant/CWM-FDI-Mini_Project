@@ -1,7 +1,1 @@
 psutil>=5.9
-
-# Optional: enables in-browser JS responsiveness and Performance API
-# page load metrics in Detector.py. Without it, Detector.py runs in a
-# stdlib-only fallback mode.
-# On externally-managed systems install via:  sudo apt install python3-selenium
-selenium>=4.6

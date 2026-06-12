@@ -50,7 +50,7 @@ When an alert fires, the detector also prints the **top resource
 consumers**. In Marionette mode this is per website (via
 `ChromeUtils.requestProcInfo()`, the API behind `about:processes` -
 with Fission every site runs in its own process, so CPU and memory can
-be attributed to specific origins). In the other modes it falls back to
+be attributed to specific origins). In fallback mode it falls back to
 ranking individual Firefox processes by CPU/memory, which shows the
 process role (e.g. "Isolated Web Co") but not the website name.
 
@@ -58,11 +58,10 @@ process role (e.g. "Isolated Web Co") but not the website name.
 
 - Linux, Python 3.8+
 - `psutil` (e.g. `sudo apt install python3-psutil`)
-- Optional: `selenium` (e.g. `sudo apt install python3-selenium`) —
-  only needed if you want the Selenium mode; see below.
 
-On externally-managed systems (PEP 668), install packages through `apt`
-as shown above, or use a virtual environment:
+Everything else is the Python standard library. On externally-managed
+systems (PEP 668), install psutil through `apt` as shown above, or use
+a virtual environment:
 
 ```bash
 python3 -m venv venv
@@ -98,15 +97,10 @@ You browse in your normal Firefox window; the detector connects to it
 from outside. You can test the connection on its own with
 `python3 Marionette.py`.
 
-### 2. Selenium mode
+### 2. Fallback mode (stdlib only)
 
-Used automatically if Marionette is unreachable and `selenium` is
-installed. Opens its own Firefox window via geckodriver.
-
-### 3. Fallback mode (stdlib only)
-
-Used if no browser connection is available. Approximates the two
-in-browser metrics:
+Used automatically if the Marionette connection is unavailable.
+Approximates the two in-browser metrics:
 
 - responsiveness → scheduling lag of a 50 ms sleep (threshold 0.1 s
   instead of 0.5 s),
