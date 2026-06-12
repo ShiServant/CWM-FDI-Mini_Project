@@ -9,7 +9,10 @@ Usage:
     1. Close all running Firefox windows.
     2. Start Firefox with the protocol enabled:
 
-           firefox -marionette &
+           firefox -marionette -remote-allow-system-access &
+
+       (-remote-allow-system-access is only needed for privileged
+       chrome-context scripts, e.g. per-site resource attribution.)
 
     3. Connect from Python:
 

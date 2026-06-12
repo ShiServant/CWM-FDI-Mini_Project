@@ -12,7 +12,11 @@ available mode, in this order:
    Firefox's built-in remote protocol, spoken over a plain TCP socket
    using only the standard library. Start Firefox yourself with:
 
-       firefox -marionette &
+       firefox -marionette -remote-allow-system-access &
+
+   (-remote-allow-system-access enables the privileged API used for
+   per-website resource attribution; without it the detector still
+   works but alerts only show process-level data.)
 
 2. Fallback (stdlib only, no browser connection):
    - Responsiveness proxy: scheduling lag of a short sleep.
@@ -177,8 +181,14 @@ class MarionetteMetrics:
             self._consumer_error_shown = True
             print(
                 f"Note: per-site attribution unavailable ({reason}); "
-                "alerts will fall back to process-level data.\n"
+                "alerts will fall back to process-level data."
             )
+            if "system access" in reason.lower():
+                print(
+                    "      Fix: restart Firefox with\n"
+                    "      firefox -marionette -remote-allow-system-access"
+                )
+            print()
 
     def sample_consumers(self):
         """
@@ -460,7 +470,8 @@ def create_metrics():
     except OSError:
         print(
             "Marionette not reachable on port 2828.\n"
-            "(To enable it: close Firefox, then run  firefox -marionette)\n"
+            "(To enable it: close Firefox, then run\n"
+            "  firefox -marionette -remote-allow-system-access )\n"
         )
 
     return FallbackMetrics()

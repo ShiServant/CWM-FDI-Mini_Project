@@ -12,6 +12,7 @@ detects CPU, memory and network bottlenecks in real time, using a
 | `Memmon.py` | Measures combined Firefox memory usage (RSS, bytes). |
 | `Marionette.py` | Minimal client for Firefox's built-in Marionette remote protocol (standard library only). |
 | `Detector.py` | Main program: collects all metrics, applies the bottleneck rules and prints alerts. |
+| `Diagnose.py` | Step-by-step test of the Marionette connection, for troubleshooting. |
 
 ## Metrics
 
@@ -83,8 +84,9 @@ geckodriver uses). `Marionette.py` speaks it over a plain TCP socket.
 # Close Firefox completely first - the flag only works on a fresh launch
 pkill firefox
 
-# Start Firefox with Marionette enabled (robot icon appears in the URL bar)
-firefox -marionette &
+# Start Firefox with Marionette enabled (robot icon appears in the URL bar).
+# -remote-allow-system-access is needed for per-website attribution.
+firefox -marionette -remote-allow-system-access &
 
 # Verify it is listening (should show 127.0.0.1:2828)
 ss -tln | grep 2828
@@ -129,6 +131,7 @@ Monitoring mode: Marionette (built into Firefox, no installs needed)
 python3 CPUmon.py       # CPU monitor only
 python3 Memmon.py       # memory monitor only
 python3 Marionette.py   # test the Marionette connection
+python3 Diagnose.py     # full step-by-step connection diagnostic
 ```
 
 ## Troubleshooting
@@ -140,6 +143,11 @@ python3 Marionette.py   # test the Marionette connection
   contains `-marionette`, and that `ss -tln | grep 2828` shows a
   listener. For snap/flatpak installs try `MOZ_MARIONETTE=1 firefox &`
   or `flatpak run org.mozilla.firefox -marionette`.
+- **Alerts show `firefox (pid ...)` instead of website names** — the
+  privileged per-site API needs Firefox to be started with the extra
+  `-remote-allow-system-access` flag (the detector prints a note with
+  the reason at startup). Run `python3 Diagnose.py` to test the whole
+  chain step by step.
 - **Readings include other Firefox windows** — the CPU/memory monitors
   aggregate *all* Firefox processes on the system, so close other
   instances for clean measurements.

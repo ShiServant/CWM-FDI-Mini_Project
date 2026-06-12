@@ -20,6 +20,9 @@ import psutil
 from Marionette import MarionetteClient
 
 
+FAILURES = []
+
+
 def step(num, title):
     print(f"\n[{num}] {title}")
 
@@ -29,6 +32,7 @@ def ok(msg):
 
 
 def fail(msg, hint=None):
+    FAILURES.append(msg)
     print(f"    FAIL  {msg}")
     if hint:
         print(f"          Hint: {hint}")
@@ -72,7 +76,7 @@ def main():
                 "No main Firefox process has -marionette in its command line.",
                 "Firefox was already running when you launched it, or a "
                 "wrapper dropped the flag. Run:  pkill firefox; then "
-                "firefox -marionette &   (or  MOZ_MARIONETTE=1 firefox & )",
+                "firefox -marionette -remote-allow-system-access &",
             )
 
     print(f"          firefox binary: {shutil.which('firefox') or 'not on PATH'}")
@@ -138,11 +142,22 @@ def main():
                     "and run again."
                 )
     except Exception as exc:
-        fail(f"{exc.__class__.__name__}: {exc}")
+        hint = None
+        if "system access" in str(exc).lower():
+            hint = (
+                "Restart Firefox with:  pkill firefox; "
+                "firefox -marionette -remote-allow-system-access &"
+            )
+        fail(f"{exc.__class__.__name__}: {exc}", hint)
 
     client.close()
-    print("\nAll steps passed -> Detector.py will show website names. "
-          "If any step failed, fix that step and re-run.")
+
+    print()
+    if FAILURES:
+        print(f"{len(FAILURES)} step(s) FAILED - fix the first failure "
+              "above and re-run.")
+    else:
+        print("All steps passed -> Detector.py will show website names.")
 
 
 if __name__ == "__main__":
