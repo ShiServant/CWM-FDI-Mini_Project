@@ -21,9 +21,8 @@ detects CPU, memory and network bottlenecks in real time, using a
   `execute_script()` call inside the browser.
 - **Page load time (s)** — from the browser Performance API
   (Navigation Timing: `loadEventEnd - startTime`). Each completed page
-  load enters the detection window once (marked `(new)` in the status
-  line) and expires after 15 s; the status line keeps showing the
-  current page's load time for reference.
+  load is recorded once for detection and shown in the status line only
+  on that tick; otherwise `Load: n/a`.
 
 ## Detection rules
 
@@ -44,8 +43,8 @@ Two severity levels are reported: `WARNING` and `BOTTLENECK`.
 
 **Network (possible bottleneck)**
 
-- Average CPU < 50% **and** memory < 80% of system memory **and**
-  average page load time > 5 s
+- Evaluated immediately when a page load completes: CPU < 50% **and**
+  memory < 80% of system memory **and** page load time > 5 s
 
 Thresholds are constants at the top of `Detector.py` and can be tuned.
 

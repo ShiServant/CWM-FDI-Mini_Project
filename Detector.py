@@ -233,25 +233,26 @@ def detect_memory(current_mem_mb, mem_growth_mb, total_mem_mb):
     return None
 
 
-def detect_network(avg_cpu, current_mem_mb, total_mem_mb, avg_load):
+def detect_network(cpu, current_mem_mb, total_mem_mb, page_load_seconds):
     """
-    Network rule (possible network bottleneck):
-        avg CPU < 50%
+    Network rule (possible network bottleneck), evaluated when a page
+    load completes:
+        CPU < 50%
         AND memory < 80% of system memory
-        AND avg page load time > 5s
+        AND page load time > 5s
     """
-    if avg_load is None:
+    if page_load_seconds is None:
         return None
 
-    cpu_low = avg_cpu < CPU_LOW_PERCENT
+    cpu_low = cpu < CPU_LOW_PERCENT
     mem_ok = (current_mem_mb / total_mem_mb) < MEM_SYSTEM_FRACTION
-    load_slow = avg_load > PAGE_LOAD_SLOW_SECONDS
+    load_slow = page_load_seconds > PAGE_LOAD_SLOW_SECONDS
 
     if cpu_low and mem_ok and load_slow:
         return (
             "BOTTLENECK", "Network (possible)",
-            f"avg page load {avg_load:.2f}s > {PAGE_LOAD_SLOW_SECONDS:.0f}s while "
-            f"CPU ({avg_cpu:.1f}%) and memory are within normal range",
+            f"page load {page_load_seconds:.2f}s > {PAGE_LOAD_SLOW_SECONDS:.0f}s while "
+            f"CPU ({cpu:.1f}%) and memory are within normal range",
             "Check connection speed, Wi-Fi signal and DNS; the slowdown is "
             "likely network- or server-side, not Firefox.",
         )
@@ -294,9 +295,6 @@ def run_detector(duration_seconds=None):
     cpu_window = deque(maxlen=WINDOW_SECONDS)
     mem_window = deque(maxlen=WINDOW_SECONDS)
     resp_window = deque(maxlen=WINDOW_SECONDS)
-    # Page loads are events, not per-second readings: each navigation is
-    # recorded once as (timestamp, seconds) and expires after the window.
-    load_samples = []
 
     # Warm-up: psutil needs an initial call before
     # cpu_percent() returns meaningful values.
@@ -313,7 +311,6 @@ def run_detector(duration_seconds=None):
             tick_start = time.perf_counter()
 
             # ---- Collect one sample of each metric ----
-            now = time.time()
             cpu = get_firefox_cpu_percent()
             mem_mb = get_firefox_memory_usage() / (1024 * 1024)
             resp = metrics.responsiveness()
@@ -322,33 +319,34 @@ def run_detector(duration_seconds=None):
             cpu_window.append(cpu)
             mem_window.append(mem_mb)
             resp_window.append(resp)
-            if load_is_new:
-                load_samples.append((now, page_load))
-            # Drop page load samples older than the sliding window
-            load_samples = [
-                s for s in load_samples if now - s[0] <= WINDOW_SECONDS
-            ]
 
             # ---- Status line ----
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            load_text = f"{page_load:.2f}s" if page_load is not None else "n/a"
             if load_is_new:
-                load_text += " (new)"
+                load_text = f"{page_load:.2f}s"
+            else:
+                load_text = "n/a"
             print(
                 f"[{timestamp}] CPU: {cpu:5.1f}% | "
                 f"Mem: {mem_mb:8.1f} MB ({mem_mb / total_mem_mb * 100:4.1f}% sys) | "
                 f"{metrics.resp_label}: {resp:.3f}s | Load: {load_text}"
             )
 
-            # ---- Evaluate rules once the window is full ----
+            # ---- Network rule: fire as soon as a page load completes ----
+            if load_is_new:
+                network_alert = detect_network(cpu, mem_mb, total_mem_mb, page_load)
+                if network_alert is not None:
+                    severity, kind, details, recommendation = network_alert
+                    print(
+                        f"[{timestamp}] {severity:10s} | {kind} | {details}\n"
+                        f"{'':21s} Recommendation: {recommendation}"
+                    )
+
+            # ---- CPU / memory rules (15-second sliding window) ----
             if len(cpu_window) == WINDOW_SECONDS:
                 avg_cpu = sum(cpu_window) / len(cpu_window)
                 avg_resp = sum(resp_window) / len(resp_window)
                 mem_growth_mb = mem_window[-1] - mem_window[0]
-                avg_load = (
-                    sum(v for _, v in load_samples) / len(load_samples)
-                    if load_samples else None
-                )
 
                 alerts = [
                     detect_cpu(
@@ -356,7 +354,6 @@ def run_detector(duration_seconds=None):
                         metrics.resp_threshold, metrics.resp_label,
                     ),
                     detect_memory(mem_mb, mem_growth_mb, total_mem_mb),
-                    detect_network(avg_cpu, mem_mb, total_mem_mb, avg_load),
                 ]
 
                 for alert in alerts:
