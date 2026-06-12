@@ -17,7 +17,7 @@ def collect_data(duration_seconds=300):
 
     Returns:
         list of dicts, one per sample:
-        {timestamp, cpu_percent, memory_mb, upload_kbps, download_kbps}
+        {timestamp, cpu_percent, memory_mb, upload_mbps, download_mbps}
     """
     samples = []
 
@@ -48,8 +48,8 @@ def collect_data(duration_seconds=300):
             "timestamp": time.time(),
             "cpu_percent": cpu_percent,
             "memory_mb": memory_bytes / (1024 * 1024),
-            "upload_kbps": upload_bps / 1024,
-            "download_kbps": download_bps / 1024,
+            "upload_mbps": upload_bps * 8 / 1_000_000,
+            "download_mbps": download_bps * 8 / 1_000_000,
         }
         samples.append(sample)
 
@@ -58,8 +58,8 @@ def collect_data(duration_seconds=300):
             f"[{elapsed:5.1f}s] "
             f"CPU: {sample['cpu_percent']:5.1f}% | "
             f"Memory: {sample['memory_mb']:8.2f} MB | "
-            f"Upload: {sample['upload_kbps']:8.2f} KB/s | "
-            f"Download: {sample['download_kbps']:8.2f} KB/s"
+            f"Upload: {sample['upload_mbps']:7.2f} Mbps | "
+            f"Download: {sample['download_mbps']:7.2f} Mbps"
         )
 
     print(f"\nCollected {len(samples)} samples over {duration_seconds} seconds.")

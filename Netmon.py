@@ -58,5 +58,5 @@ if __name__ == "__main__":
         upload_speed = get_upload_speed()
         download_speed = get_download_speed()
 
-        print(f"Upload Speed: {upload_speed / 1024:.2f} KB/s")
-        print(f"Download Speed: {download_speed / 1024:.2f} KB/s")
+        print(f"Upload Speed: {upload_speed * 8 / 1_000_000:.2f} Mbps")
+        print(f"Download Speed: {download_speed * 8 / 1_000_000:.2f} Mbps")

@@ -16,23 +16,48 @@ Firefox Bottleneck Detector (Linux)
 │
 └── Report Generator
 
-Bottleneck Criterias:
-CPU Bottleneck:
-CPU Usage > 80% for at least 15 seconds
-AND
-Average Page Load Time > 3 seconds
+CPU Detection:
 
-Memory Bottleneck:
-Memory Usage increases continuously
-(e.g., > 500 MB growth within 5 minutes)
-AND
-Browser Responsiveness > 0.5 seconds
+* Warning:
 
-Network Bottleneck:
-CPU Usage < 50%
-AND
-Memory Usage remains within normal range
-AND
-Average Page Load Time > 5 seconds
+  * Average CPU usage > 80%
+    OR
+  * Average JavaScript responsiveness > 0.5s
+* Bottleneck:
+
+  * Average CPU usage > 80%
+    AND
+  * Average JavaScript responsiveness > 0.5s
+
+Memory Detection:
+
+* Warning:
+
+  * Memory usage > 80% of total system memory
+    OR
+  * Memory growth > 500MB within a 15-second window
+* Bottleneck:
+
+  * Memory usage > 80% of total system memory
+    AND
+  * Memory growth > 500MB within a 15-second window
+
+Network Detection:
+
+* Possible Network Bottleneck:
+
+  * Average CPU usage < 50%
+    AND
+  * Memory usage < 80% of total system memory
+    AND
+  * Average page load time > 5s
+
+Requirements:
+
+* Use a 15-second sliding window for all averages.
+* Continuously monitor Firefox.
+* Print timestamp, severity, bottleneck type, metric values, and recommendation.
+* Support Warning and Bottleneck severity levels.
+
 
 '''
