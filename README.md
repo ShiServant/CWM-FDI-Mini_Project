@@ -20,7 +20,10 @@ detects CPU, memory and network bottlenecks in real time, using a
 - **JavaScript responsiveness (s)** — round-trip time of a trivial
   `execute_script()` call inside the browser.
 - **Page load time (s)** — from the browser Performance API
-  (Navigation Timing: `loadEventEnd - startTime`).
+  (Navigation Timing: `loadEventEnd - startTime`). Each completed page
+  load enters the detection window once (marked `(new)` in the status
+  line) and expires after 15 s; the status line keeps showing the
+  current page's load time for reference.
 
 ## Detection rules
 

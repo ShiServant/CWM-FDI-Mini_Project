@@ -55,12 +55,13 @@ FETCH_TIMEOUT_SECONDS = 10
 # -------------------------------------------------
 # Metric providers
 # -------------------------------------------------
-# JavaScript snippet shared by the browser-connected modes: reads the
-# current page's load time from the Performance API (Navigation Timing).
+# Reads the current page's load time from the Performance API
+# (Navigation Timing), plus performance.timeOrigin - a timestamp unique
+# to each navigation, used to detect when a NEW page load has happened.
 PAGE_LOAD_SCRIPT = (
     "const nav = performance.getEntriesByType('navigation')[0];"
     "if (!nav || nav.loadEventEnd === 0) { return null; }"
-    "return nav.loadEventEnd - nav.startTime;"
+    "return [performance.timeOrigin, nav.loadEventEnd - nav.startTime];"
 )
 
 class MarionetteMetrics:
@@ -77,6 +78,12 @@ class MarionetteMetrics:
 
     def __init__(self):
         self.client = MarionetteClient()
+        # Remember the page that is already open so its (possibly old)
+        # load time is not counted as a fresh navigation.
+        self._last_time_origin = None
+        result = self.client.execute_script(PAGE_LOAD_SCRIPT)
+        if result is not None:
+            self._last_time_origin = result[0]
         print("Connected to Firefox via Marionette; browse normally.\n")
 
     def responsiveness(self):
@@ -86,9 +93,22 @@ class MarionetteMetrics:
         return time.perf_counter() - start
 
     def page_load_time(self):
-        """Current page's load time in seconds, or None if still loading."""
-        load_ms = self.client.execute_script(PAGE_LOAD_SCRIPT)
-        return None if load_ms is None else load_ms / 1000.0
+        """
+        Returns (load_seconds, is_new):
+            load_seconds - the current page's load time, or None if a
+                           page is still loading;
+            is_new       - True only on the first reading after a new
+                           page load completes, so each navigation is
+                           counted once.
+        """
+        result = self.client.execute_script(PAGE_LOAD_SCRIPT)
+        if result is None:
+            return None, False
+
+        time_origin, load_ms = result
+        is_new = time_origin != self._last_time_origin
+        self._last_time_origin = time_origin
+        return load_ms / 1000.0, is_new
 
     def close(self):
         self.client.close()
@@ -125,13 +145,13 @@ class FallbackMetrics:
 
     def page_load_time(self):
         """
-        Timed download of TEST_URL (seconds), measured every
-        FETCH_EVERY_N_TICKS calls to limit network traffic.
-        Returns None on the other ticks or if the fetch fails.
+        Returns (load_seconds, is_new): a timed download of TEST_URL,
+        measured every FETCH_EVERY_N_TICKS calls to limit network
+        traffic. Every successful download is a fresh sample.
         """
         self._tick += 1
         if self._tick % FETCH_EVERY_N_TICKS != 0:
-            return None
+            return None, False
 
         try:
             start = time.perf_counter()
@@ -139,9 +159,9 @@ class FallbackMetrics:
                 TEST_URL, timeout=FETCH_TIMEOUT_SECONDS
             ) as response:
                 response.read()
-            return time.perf_counter() - start
+            return time.perf_counter() - start, True
         except OSError:
-            return None
+            return None, False
 
     def close(self):
         pass
@@ -306,7 +326,9 @@ def run_detector(duration_seconds=None):
     cpu_window = deque(maxlen=WINDOW_SECONDS)
     mem_window = deque(maxlen=WINDOW_SECONDS)
     resp_window = deque(maxlen=WINDOW_SECONDS)
-    load_window = deque(maxlen=WINDOW_SECONDS)
+    # Page loads are events, not per-second readings: each navigation is
+    # recorded once as (timestamp, seconds) and expires after the window.
+    load_samples = []
 
     # Warm-up: psutil needs an initial call before
     # cpu_percent() returns meaningful values.
@@ -323,20 +345,27 @@ def run_detector(duration_seconds=None):
             tick_start = time.perf_counter()
 
             # ---- Collect one sample of each metric ----
+            now = time.time()
             cpu = get_firefox_cpu_percent()
             mem_mb = get_firefox_memory_usage() / (1024 * 1024)
             resp = metrics.responsiveness()
-            page_load = metrics.page_load_time()
+            page_load, load_is_new = metrics.page_load_time()
 
             cpu_window.append(cpu)
             mem_window.append(mem_mb)
             resp_window.append(resp)
-            if page_load is not None:
-                load_window.append(page_load)
+            if load_is_new:
+                load_samples.append((now, page_load))
+            # Drop page load samples older than the sliding window
+            load_samples = [
+                s for s in load_samples if now - s[0] <= WINDOW_SECONDS
+            ]
 
             # ---- Status line ----
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             load_text = f"{page_load:.2f}s" if page_load is not None else "n/a"
+            if load_is_new:
+                load_text += " (new)"
             print(
                 f"[{timestamp}] CPU: {cpu:5.1f}% | "
                 f"Mem: {mem_mb:8.1f} MB ({mem_mb / total_mem_mb * 100:4.1f}% sys) | "
@@ -349,7 +378,8 @@ def run_detector(duration_seconds=None):
                 avg_resp = sum(resp_window) / len(resp_window)
                 mem_growth_mb = mem_window[-1] - mem_window[0]
                 avg_load = (
-                    sum(load_window) / len(load_window) if load_window else None
+                    sum(v for _, v in load_samples) / len(load_samples)
+                    if load_samples else None
                 )
 
                 alerts = [
